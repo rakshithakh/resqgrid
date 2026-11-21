@@ -20,6 +20,7 @@ const NOTICES = [
 
 export default function Home() {
   const { data: s, error } = usePoll('/public/status')
+  const byType = s?.by_type && typeof s.by_type === 'object' ? s.by_type : {}
   const stat = (v, l) => (
     <div className="stat">
       <b>{v ?? '-'}</b>
@@ -122,10 +123,10 @@ export default function Home() {
         <strong>If someone is in immediate danger, call 112 first.</strong>
         <span>This portal supports coordination. It does not replace emergency services.</span>
       </section>
-      {s && Object.keys(s.by_type).length > 0 && (
+      {Object.keys(byType).length > 0 && (
         <p className="small">
           Open needs by type:{' '}
-          {Object.entries(s.by_type)
+          {Object.entries(byType)
             .map(([k, v]) => `${TYPE[k]} ${v}`)
             .join(', ')}
           .

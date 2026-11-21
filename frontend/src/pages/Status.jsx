@@ -4,7 +4,8 @@ export default function Status() {
   const { data: s, error } = usePoll('/public/status', 4000)
   if (error) return <p className="msg err">Status unavailable. {error}</p>
   if (!s) return <p>Loading current status...</p>
-  const max = Math.max(1, ...Object.values(s.by_type))
+  const byType = s.by_type && typeof s.by_type === 'object' ? s.by_type : {}
+  const max = Math.max(1, ...Object.values(byType))
   return (
     <>
       <h1>Public status board</h1>
@@ -33,11 +34,11 @@ export default function Status() {
       <section className="two">
         <div>
           <h2 className="sec">Open needs by type</h2>
-          {Object.keys(s.by_type).length === 0 ? (
+          {Object.keys(byType).length === 0 ? (
             <p>No open needs at this time.</p>
           ) : (
             <ul className="bars">
-              {Object.entries(s.by_type).map(([k, v]) => (
+              {Object.entries(byType).map(([k, v]) => (
                 <li key={k}>
                   <span>{TYPE[k]}</span>
                   <i style={{ width: `${(v / max) * 100}%` }} />

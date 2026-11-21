@@ -96,7 +96,12 @@ export async function api(path, { method = 'GET', body, auth = false } = {}) {
     window.location.href = '/login/officer?expired=1'
     throw new Error('Session expired')
   }
-  const d = await r.json().catch(() => ({}))
+  let d
+  try {
+    d = await r.json()
+  } catch {
+    throw new Error('The server returned a non-JSON response. Set VITE_API_URL to the deployed backend URL, then redeploy.')
+  }
   if (!r.ok)
     throw new Error(
       typeof d.detail === 'string'
