@@ -1,72 +1,109 @@
 # ResQGrid
 
-A flood-relief coordination portal for reporting emergencies, tracking requests, dispatching relief vehicles, and visualizing flood and route data on an interactive map.
+A flood relief coordination portal built for the IDEA//FORGE hackathon (Track 2, emergency response and logistics).
 
-## How ResQGrid Works
+People affected by a flood send a request in English, Hindi or Kannada, either through a web form or by SMS.
+The backend works out what they need, where they are and how far to trust the report, then plans relief truck
+routes on real OpenStreetMap roads. When a road is closed or a new report arrives, the plan is recalculated
+automatically. An officer approves each dispatch before trucks are released.
 
-### The flow in one breath
+## How it works
 
-Message in, understood, located, trust-scored, prioritised, routed on real roads, approved by an officer, shown on a map.
+1. **Reading the message.** `extract.py` pulls out the need type (water, food, medical, rescue, shelter),
+   head-count, vulnerable groups and urgency. It uses Gemini when `GEMINI_API_KEY` is set and falls back to a
+   keyword-based extractor otherwise. The model is never asked for coordinates or routes.
+2. **Finding the place.** A ward or landmark named in the text is matched against OpenStreetMap place names.
+   Phone GPS is snapped to the nearest road node.
+3. **Trust score.** Each need starts at 55% and goes up or down depending on phone verification, whether GPS
+   agrees with the stated place, independent reports of the same need, and plausibility checks (for example a
+   head-count of 5,000). Needs below 50% wait in a review queue for an officer.
+4. **Priority.** People affected, vulnerable groups, need type, waiting time and trust give a score from 0 to 100.
+5. **Routing.** Closed roads are removed from the graph, travel times come from Dijkstra, and OR-Tools solves a
+   capacitated multi-depot routing problem. The result is compared with a "nearest truck, first come" baseline.
+6. **Agent loop.** A background task notices new reports or closures and replans a moment later.
 
-### Plain-language answers
+Optimisation and trust scoring are ordinary algorithms on purpose; the language model only reads the messages.
 
-**What does the AI do?** It reads informal multilingual messages and fills a fixed form: needs, number of people, vulnerable groups, urgency. It never decides routes or allocations. Without a Gemini key, a built-in rules extractor does the same job, and the receipt shows which extractor was used.
+## Demo accounts
 
-**Why not let the AI plan routes?** It cannot guarantee that a plan is feasible or optimal. Routing uses shortest paths and an optimiser, so every decision can be checked.
+| Role | Sign in |
+|---|---|
+| Citizen | Any 10-digit number. In demo mode the one-time code is shown on screen |
+| Officer | `controlroom` / `Relief@2026` |
+| Driver | Any vehicle, PIN `1234` |
 
-**How is the location found?** From a ward or landmark name in the text, matched against OpenStreetMap place names, or from phone GPS snapped to the nearest road point. If both exist and disagree by more than 1.5 km, trust drops and an officer reviews it.
+## Running it locally
 
-**What is the trust score?** It starts at 55%. Place found +10, phone verified +5, GPS agrees +10, and each extra independent verified reporter +15 (maximum +30).
+Backend (Python 3.10+):
 
-Trust is reduced by:
+    cd backend
+    pip install -r requirements.txt
+    uvicorn app.main:app --port 8000
 
-- Phone not verified: -25
-- GPS far from the claim: -30
-- More than 800 people: -30
-- Rescue claim from high ground with no flood hazard: -40
-- No place found: -30
-- Too many messages: -30
+Frontend (Node 18+), in another terminal:
 
-Below 50%, or with an unrecognised need type, the report goes to the officer review queue.
+    cd frontend
+    npm install
+    npm run dev
 
-**How is priority calculated?**
+Then open http://localhost:5173. The app starts empty; use **Load sample data** in the control room to fill it.
 
-```text
-100 x (1 - e^(-raw/150))
-```
+### Real map
 
-Raw priority is:
+Without a map download the app runs on a small synthetic grid. To use real roads around Hubballi:
 
-```text
-people (maximum 300)
-x (1 + 0.35 per vulnerable group, maximum +1)
-x type weight
-x (1 + 0.3 per hour waiting, maximum 4 hours)
-x (0.5 + 0.5 x trust)
-```
+    cd backend
+    python -m app.fetch_osm            # needs internet, takes a minute or two
+    python -m app.fetch_osm --compress # writes the .gz copy that can be committed
 
-Type weights are: rescue 2.0, medical 1.6, water 1.2, food 1.0, and shelter 0.8.
+Use `--lat`, `--lng` and `--km` for another place. If the Overpass servers are busy, `--print-query` prints the
+query so you can run it on overpass-turbo.eu and load the exported file with `--file raw.json`.
 
-**How are routes planned?** The road map is a graph. Closed roads, meaning roads within a closure radius, are removed. Slow roads cost three times more. Shortest travel times come from Dijkstra. Google OR-Tools then solves a capacitated multi-depot routing problem: each truck has a capacity in kg, skipping a need costs a penalty that grows with priority, and arriving late is penalised more for urgent needs.
+### Settings
 
-Load per need is people x kg per person: water 3, food 1, medical 0.5, shelter 2, and rescue 0.5. The load is capped at 450 kg.
+Everything is optional; see `backend/.env.example`. Copy it to `backend/.env` to change `SMS_PROVIDER`
+(`demo`, `fast2sms` or `android`), `GEMINI_API_KEY`, `MAP_MODE` and others.
 
-**What is the comparison table?** The "nearest truck" baseline serves needs in the order they arrived, assigning each to the closest truck by straight-line distance. ResQGrid's plan is compared with that baseline using the same closed roads. With only one need, both plans are identical, so testing several needs is recommended.
+### Tests
 
-**What is the agent?** A background loop notices new reports or closures and replans about a second later, then pushes the update to the screen. An officer must still approve dispatch.
+    cd backend
+    pip install pytest
+    pytest
 
-**What if there is no internet or app access?** People can text the relief number. The phone network supplies the sender number, so no code is needed. Alternatively, they can send an emergency report, which is accepted but held for officer review.
+## Deployment
 
-**What stops fake reports?** Phone verification, GPS cross-checking, corroboration, plausibility checks, rate limits, and human review reduce the risk of harm, but they cannot stop coordinated fake reports.
+The backend runs on Render (`render.yaml`) and the frontend on Vercel (`frontend/vercel.json`). On Vercel set
+`VITE_API_URL` to the Render address. Render's free plan wipes the SQLite file when the service sleeps, so set
+`AUTOSEED=1` if you want sample data after each restart. A `Dockerfile` is also included for running website and
+API together as one service.
 
-**How is vehicle tracking done?** A driver signs in with a vehicle ID and PIN, then shares phone GPS every few seconds. The server keeps the latest point in memory for 90 seconds, and the officer map displays it. It does not currently change the plan.
+## Layout
 
-**What is real vs simulated?** Road data, message reporting, routing, officer approval, and live driver GPS can be real or application-level features. Closures, vehicle movement without shared GPS, and the demo SMS network are simulated.
+    backend/app/core.py      road graph, place matching, routing, dispatch solver
+    backend/app/extract.py   Gemini or keyword extraction of needs from a message
+    backend/app/store.py     SQLite access, report ingestion, trust and priority, planning
+    backend/app/osm.py       builds the road graph from downloaded OpenStreetMap data
+    backend/app/smsout.py    optional outgoing SMS for one-time codes
+    backend/app/main.py      REST API, WebSocket updates, agent loop
+    backend/tests/           pytest suite
+    frontend/src/            React pages and components, Leaflet map
 
-## Honest limitations
+## What is simulated
 
-- Roads are two-way, and speeds are assumed by road type.
+Flood closures are placed by hand, trucks move along their planned route unless a driver shares real GPS,
+and the SMS network is an on-page phone simulator. Live GPS from drivers is shown on the map but does not
+change the plan.
+
+## Known limitations
+
+- Roads are treated as two-way and speeds come from road type, not traffic.
+- Replanning sends trucks from their depots again instead of from where they currently are.
+- The demo accounts and demo one-time codes are not secure and are not meant for real use.
 - There is no flood prediction.
-- Replanning restarts vehicles from their depots.
-- Demo accounts and demo OTPs are not secure for real use.
 
+## Credits
+
+Map data from OpenStreetMap contributors (ODbL), fetched with the Overpass API. Elevation from Open-Meteo.
+Built with FastAPI, Pydantic, NetworkX, Google OR-Tools, React, Vite, Leaflet and React Router. Optional message
+understanding with the Gemini API. An AI coding assistant (Claude, by Anthropic) was used while building this
+project; I reviewed and tested the code myself.

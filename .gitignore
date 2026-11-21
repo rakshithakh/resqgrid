@@ -1,0 +1,10 @@
+venv/
+.venv/
+node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
+*.db
+.env
+backend/data/osm_cache.json
+.DS_Store
