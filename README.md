@@ -69,4 +69,4 @@ Load per need is people x kg per person: water 3, food 1, medical 0.5, shelter 2
 - There is no flood prediction.
 - Replanning restarts vehicles from their depots.
 - Demo accounts and demo OTPs are not secure for real use.
-- Free hosting may sleep when idle.
+
